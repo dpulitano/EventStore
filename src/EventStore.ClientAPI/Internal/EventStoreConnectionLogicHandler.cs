@@ -259,6 +259,7 @@ namespace EventStore.ClientAPI.Internal {
 
 			if (_settings.DefaultUserCredentials != null) {
 				_connectingPhase = ConnectingPhase.Authentication;
+				_authInfo = new AuthInfo(Guid.NewGuid(), _stopwatch.Elapsed, 0);
 
 				_authInfo = new AuthInfo(Guid.NewGuid(), _stopwatch.Elapsed);
 				_connection.EnqueueSend(new TcpPackage(TcpCommand.Authenticate,
@@ -320,8 +321,31 @@ namespace EventStore.ClientAPI.Internal {
 
 					if (_connectingPhase == ConnectingPhase.Authentication &&
 					    _stopwatch.Elapsed - _authInfo.TimeStamp >= _settings.OperationTimeout) {
-						RaiseAuthenticationFailed("Authentication timed out.");
-						GoToIdentifyState();
+
+						if (!_settings.RetryAuthenticationOnTimeout || (_settings.MaxRetries != -1 && _authInfo.Retries >= _settings.MaxRetries)) {
+							RaiseAuthenticationFailed("Authentication timed out.");
+							GoToIdentifyState();
+						} else {
+							// We resend the authentication package if the authentication phase has failed.
+							_authInfo = new AuthInfo(_authInfo.CorrelationId, _stopwatch.Elapsed, _authInfo.Retries + 1);
+							var max = _settings.MaxRetries == -1 ? "inf" : _settings.MaxRetries.ToString();
+							LogInfo($"Authentication timed out. Retrying... {_authInfo.Retries}/{max}");
+
+							var package = _settings.DefaultUserCredentials.AuthToken != null
+								? new TcpPackage(TcpCommand.Authenticate,
+									TcpFlags.Authenticated,
+									_authInfo.CorrelationId,
+									_settings.DefaultUserCredentials.AuthToken,
+									null)
+								: new TcpPackage(TcpCommand.Authenticate,
+									TcpFlags.Authenticated,
+									_authInfo.CorrelationId,
+									_settings.DefaultUserCredentials.Username,
+									_settings.DefaultUserCredentials.Password,
+									null);
+
+							_connection.EnqueueSend(package);
+						}
 					}
 
 					if (_connectingPhase == ConnectingPhase.Identification &&
@@ -655,10 +679,12 @@ namespace EventStore.ClientAPI.Internal {
 		private struct AuthInfo {
 			public readonly Guid CorrelationId;
 			public readonly TimeSpan TimeStamp;
+			public readonly int Retries;
 
-			public AuthInfo(Guid correlationId, TimeSpan timeStamp) {
+			public AuthInfo(Guid correlationId, TimeSpan timeStamp, int retries) {
 				CorrelationId = correlationId;
 				TimeStamp = timeStamp;
+				Retries = retries;
 			}
 		}
 

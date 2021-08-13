@@ -169,6 +169,12 @@ namespace EventStore.ClientAPI {
 		/// </summary>
 		public readonly string CompatibilityMode;
 
+		/// <summary>
+		/// If enabled, the client will not skip authentication if the process times out. The maximun retries count is the same as
+		/// ConnectionSettings.MaxRetries.
+		/// </summary>
+		public readonly bool RetryAuthenticationOnTimeout;
+
 		internal ConnectionSettings(ILogger log,
 			bool verboseLogging,
 			int maxQueueSize,
@@ -196,7 +202,8 @@ namespace EventStore.ClientAPI {
 			TimeSpan gossipTimeout,
 			NodePreference nodePreference,
 			string compatibilityMode,
-			IHttpClient customHttpClient) {
+            bool retryAuthenticationOnTimeout,
+            IHttpClient customHttpClient) {
 
 			Ensure.NotNull(log, "log");
 			Ensure.Positive(maxQueueSize, "maxQueueSize");
@@ -239,7 +246,8 @@ namespace EventStore.ClientAPI {
 			GossipTimeout = gossipTimeout;
 			NodePreference = nodePreference;
 			CompatibilityMode = compatibilityMode;
-			CustomHttpClient = customHttpClient;
+            RetryAuthenticationOnTimeout = retryAuthenticationOnTimeout;
+            CustomHttpClient = customHttpClient;
 		}
 	}
 }

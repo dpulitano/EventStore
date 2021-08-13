@@ -104,7 +104,8 @@ namespace EventStore.ClientAPI {
 						connectionSettings.ClientConnectionTimeout, connectionSettings.ClusterDns,
 						connectionSettings.GossipSeeds, connectionSettings.MaxDiscoverAttempts,
 						connectionSettings.ExternalGossipPort, connectionSettings.GossipTimeout,
-						connectionSettings.NodePreference, connectionSettings.CompatibilityMode, connectionSettings.CustomHttpClient);
+						connectionSettings.NodePreference, connectionSettings.CompatibilityMode,
+                        connectionSettings.RetryAuthenticationOnTimeout, connectionSettings.CustomHttpClient);
 				}
 
 				if (scheme == "discover") {

@@ -43,7 +43,8 @@ namespace EventStore.ClientAPI {
 		private GossipSeed[] _gossipSeeds;
 		private NodePreference _nodePreference = NodePreference.Master;
 		private string _compatibilityMode = "disabled";
-		private IHttpClient _customHttpClient = null;
+		private bool _retryAuthenticationOnTimeout;
+        private IHttpClient _customHttpClient = null;
 
 
 		internal ConnectionSettingsBuilder() {
@@ -358,7 +359,7 @@ namespace EventStore.ClientAPI {
 		}
 		
 		/// <summary>
-		/// Whether to prioritize choosing a read only replica that's alive from the known nodes. 
+		/// Whether to prioritize choosing a read only replica that's alive from the known nodes.
 		/// </summary>
 		/// <returns>A <see cref="ConnectionSettingsBuilder"/> for further configuration.</returns>
 		public ConnectionSettingsBuilder PreferReadOnlyReplica() {
@@ -451,6 +452,16 @@ namespace EventStore.ClientAPI {
 		}
 		
 		/// <summary>
+		/// If enabled, the client will not skip authentication if the process times out. The maximun retries count is the same as
+		/// ConnectionSettings.MaxRetries.
+		/// </summary>
+		/// <returns>A <see cref="ConnectionSettingsBuilder"/> for further configuration.</returns>
+		public ConnectionSettingsBuilder RetryAuthenticationOnTimeout() {
+			_retryAuthenticationOnTimeout = true;
+			return this;
+		}
+
+		/// <summary>
 		/// Convert the mutable <see cref="ConnectionSettingsBuilder"/> object to an immutable
 		/// <see cref="ConnectionSettings"/> object.
 		/// </summary>
@@ -492,7 +503,8 @@ namespace EventStore.ClientAPI {
 				_gossipTimeout,
 				_nodePreference,
 				_compatibilityMode,
-				_customHttpClient);
+                _retryAuthenticationOnTimeout,
+                _customHttpClient);
 		}
 	}
 }
