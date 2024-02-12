@@ -1093,12 +1093,9 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 
 			if (!IsReadOnly) {
 				// chunks cannot be read using filestreams while they can still be written to
-				lock (_cachedDataLock) {
-					if (_cacheStatus != CacheStatus.Cached)
-						throw new Exception("Active chunk must be cached but was not.");
-					else
-						throw new Exception("Not enough memory streams for active chunk.");
-				}
+				throw new Exception(_cacheStatus is not CacheStatus.Cached
+					? "Active chunk must be cached but was not."
+					: "Not enough memory streams for active chunk.");
 			}
 
 			// get a filestream from the pool, or create one if the pool is empty.
