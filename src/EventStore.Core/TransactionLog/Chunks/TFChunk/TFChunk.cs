@@ -253,7 +253,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 			SetAttributes(_filename, true);
 			Interlocked.Add(ref _fileStreamCount, _initialReaderCount);
 
-			var reader = GetReaderWorkItem();
+			var reader = CreateInternalReaderWorkItem();
 			try {
 				_chunkHeader = ReadHeader(reader.Stream);
 				Log.Debug("Opened completed {chunk} as version {version}", _filename, _chunkHeader.Version);
@@ -992,20 +992,6 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 		public void WaitForDestroy(int timeoutMs) {
 			if (!_destroyEvent.Wait(timeoutMs))
 				throw new TimeoutException();
-		}
-
-		private ReaderWorkItem GetReaderWorkItem() {
-			if (_selfdestructin54321)
-				throw new FileBeingDeletedException();
-
-			if (!IsReadOnly) {
-				// chunks cannot be read using filestreams while they can still be written to
-				throw new Exception(_cacheStatus is not CacheStatus.Cached
-					? "Active chunk must be cached but was not."
-					: "Not enough memory streams for active chunk.");
-			}
-
-			return CreateInternalReaderWorkItem();
 		}
 
 		private void ReturnReaderWorkItem(ReaderWorkItem item) {
