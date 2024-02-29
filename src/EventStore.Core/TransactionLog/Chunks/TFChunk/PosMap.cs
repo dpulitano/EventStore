@@ -55,7 +55,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 			return new PosMap(logPos, actualPos);
 		}
 
-		public void Write(BinaryWriter writer) {
+		public readonly void Write(BinaryWriter writer) {
 			writer.Write(ActualPos);
 			writer.Write(LogPos);
 		}

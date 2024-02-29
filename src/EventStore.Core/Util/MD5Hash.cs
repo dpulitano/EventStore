@@ -42,21 +42,5 @@ namespace EventStore.Core.Util {
 				toRead -= read;
 			}
 		}
-
-		public static void ContinuousHashFor(HashAlgorithm md5, SafeFileHandle handle, long startPosition, long count) {
-			Ensure.NotNull(md5, "md5");
-			Ensure.Nonnegative(count, "count");
-
-			var buffer = new byte[4096]; // TODO: Can be replaced with memory pooling
-
-			for (int bytesRead; count > 0L; startPosition += bytesRead, count -= bytesRead) {
-				bytesRead = RandomAccess.Read(
-					handle,
-					buffer.AsSpan().TrimLength(int.CreateSaturating(count)),
-					startPosition);
-
-				md5.TransformBlock(buffer, 0, bytesRead, null, 0);
-			}
-		}
 	}
 }
