@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -73,8 +74,6 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 
 		private readonly bool _inMem;
 		private readonly string _filename;
-		private readonly bool _unbuffered;
-		private readonly bool _writeThrough;
 		private SafeFileHandle _handle;
 		private int _fileSize;
 		private int _isReadOnly;
@@ -82,7 +81,9 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 		private ChunkFooter _chunkFooter;
 
 		private readonly int _maxReaderCount;
-		private readonly int _initialReaderCount;
+		private readonly ConcurrentQueue<ReaderWorkItem> _fileStreams = new();
+		private readonly ConcurrentQueue<ReaderWorkItem> _memStreams = new();
+		private int _internalStreamsCount;
 		private int _fileStreamCount;
 		private int _memStreamCount;
 		private int _cleanedUpFileStreams;
@@ -122,6 +123,8 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 		private readonly ManualResetEventSlim _destroyEvent = new ManualResetEventSlim(false);
 		private volatile bool _selfdestructin54321;
 		private volatile bool _deleteFile;
+		private readonly bool _unbuffered;
+		private readonly bool _writeThrough;
 		private readonly bool _reduceFileCachePressure;
 
 		private IChunkReadSide _readSide;
@@ -144,7 +147,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 
 			_filename = filename;
 			_maxReaderCount = maxReaderCount;
-			_initialReaderCount = initialReaderCount;
+			_internalStreamsCount = initialReaderCount;
 			MidpointsDepth = midpointsDepth;
 			_inMem = inMem;
 			_unbuffered = unbuffered;
@@ -251,9 +254,9 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 
 			IsReadOnly = true;
 			SetAttributes(_filename, true);
-			Interlocked.Add(ref _fileStreamCount, _initialReaderCount);
+			CreateReaderStreams();
 
-			var reader = CreateInternalReaderWorkItem();
+			var reader = GetReaderWorkItem();
 			try {
 				_chunkHeader = ReadHeader(reader.Stream);
 				Log.Debug("Opened completed {chunk} as version {version}", _filename, _chunkHeader.Version);
@@ -358,16 +361,26 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 			CacheInMemory();
 		}
 
-		private ReaderWorkItem CreateInternalReaderWorkItem() {
-			var inMemory = _cachedData is not 0;
-			var stream = inMemory
-				? new UnmanagedMemoryStream((byte*)_cachedData, _cachedLength)
-				: _unbuffered
-				? _handle.AsUnbufferedStream(FileAccess.Read)
-				: new BufferedStream(_handle.AsUnbufferedStream(FileAccess.Read), ReaderWorkItem.BufferSize);
+		// If one file stream writes to a file, and another file stream happens to have that part of
+		// the same file already in its buffer, the buffer is not (any longer) invalidated and a read from
+		// the second file stream will not contain the write.
+		// We therefore only read from memory while the chunk is still being written to, and only create
+		// the file streams when the chunk is being completed.
+		private void CreateReaderStreams() {
+			Interlocked.Add(ref _fileStreamCount, _internalStreamsCount);
 
-			var reader = new BinaryReader(stream);
-			return new ReaderWorkItem(stream, reader, inMemory);
+			if (_selfdestructin54321)
+				throw new FileBeingDeletedException();
+
+			for (int i = 0; i < _internalStreamsCount; i++) {
+				_fileStreams.Enqueue(CreateInternalReaderWorkItem());
+			}
+		}
+
+		private ReaderWorkItem CreateInternalReaderWorkItem() {
+			Debug.Assert(_handle is not null);
+
+			return new ReaderWorkItem(_handle, _unbuffered);
 		}
 
 		private void CreateInMemChunk(ChunkHeader chunkHeader, int fileSize) {
@@ -380,18 +393,21 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 			GC.AddMemoryPressure(_cachedLength);
 
 			// WRITER STREAM
-			var memStream =
-				new UnmanagedMemoryStream((byte*)_cachedData, _cachedLength, _cachedLength, FileAccess.ReadWrite);
-			WriteHeader(md5, memStream, chunkHeader);
-			memStream.Position = ChunkHeader.Size;
+			var writerWorkItem = new WriterWorkItem(_cachedData, _cachedLength, md5);
+			WriteHeader(writerWorkItem.MD5, writerWorkItem.WorkingStream, chunkHeader);
+			writerWorkItem.WorkingStream.Position = ChunkHeader.Size;
 
 			// READER STREAMS
 			Interlocked.Add(ref _memStreamCount, _maxReaderCount);
 
+			for (int i = 0; i < _maxReaderCount; i++) {
+				_memStreams.Enqueue(new ReaderWorkItem(_cachedData, _cachedLength));
+			}
+
 			// should never happen in practice because this function is called from the static TFChunk constructors
 			Debug.Assert(!_selfdestructin54321);
 
-			_writerWorkItem = new(memStream, md5);
+			_writerWorkItem = writerWorkItem;
 		}
 
 		private FileOptions WritableHandleOptions {
@@ -618,6 +634,10 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 					writerWorkItem.SetMemStream(memStream);
 				}
 
+				for (int i = 0; i < _maxReaderCount; i++) {
+					_memStreams.Enqueue(new ReaderWorkItem(_cachedData, _cachedLength));
+				}
+
 				_readSide.Uncache();
 
 				Log.Debug("CACHED TFChunk {chunk} in {elapsed}.", this, sw.Elapsed);
@@ -810,7 +830,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 			Flush();
 
 			if (!_inMem)
-				Interlocked.Add(ref _fileStreamCount, _initialReaderCount);
+				CreateReaderStreams();
 
 			IsReadOnly = true;
 
@@ -827,7 +847,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 			Flush();
 
 			if (!_inMem)
-				Interlocked.Add(ref _fileStreamCount, _initialReaderCount);
+				CreateReaderStreams();
 
 			_chunkFooter = ReadFooter(_writerWorkItem.WorkingStream);
 			IsReadOnly = true;
@@ -919,7 +939,19 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 		}
 
 		private bool TryDestructFileStreams() {
-			if (Interlocked.Exchange(ref _fileStreamCount, 0) > 0) {
+			int fileStreamCount = Interlocked.CompareExchange(ref _fileStreamCount, 0, 0);
+
+			ReaderWorkItem workItem;
+			while (_fileStreams.TryDequeue(out workItem)) {
+				workItem.Stream.Dispose();
+				workItem.Reader.Dispose();
+				fileStreamCount = Interlocked.Decrement(ref _fileStreamCount);
+			}
+
+			if (fileStreamCount < 0)
+				throw new Exception("Count of file streams reduced below zero.");
+
+			if (fileStreamCount == 0) {
 				CleanUpFileStreamDestruction();
 				return true;
 			}
@@ -965,7 +997,17 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 
 				_writerWorkItem?.DisposeMemStream();
 
-				if (Interlocked.Exchange(ref _memStreamCount, 0) > 0) {
+				int memStreamCount = Interlocked.CompareExchange(ref _memStreamCount, 0, 0);
+
+				ReaderWorkItem workItem;
+				while (_memStreams.TryDequeue(out workItem)) {
+					memStreamCount = Interlocked.Decrement(ref _memStreamCount);
+				}
+
+				if (memStreamCount < 0)
+					throw new Exception("Count of memory streams reduced below zero.");
+
+				if (memStreamCount == 0) {
 					// make sure "the light is off" for memory streams
 					FreeCachedData();
 					return true;
@@ -992,6 +1034,46 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 		public void WaitForDestroy(int timeoutMs) {
 			if (!_destroyEvent.Wait(timeoutMs))
 				throw new TimeoutException();
+		}
+
+		private ReaderWorkItem GetReaderWorkItem() {
+			if (_selfdestructin54321)
+				throw new FileBeingDeletedException();
+
+			ReaderWorkItem item;
+			// try get memory stream reader first
+			if (_memStreams.TryDequeue(out item))
+				return item;
+
+			if (_inMem)
+				throw new Exception("Not enough memory streams during in-mem TFChunk mode.");
+
+			if (!IsReadOnly) {
+				// chunks cannot be read using filestreams while they can still be written to
+				throw new Exception(_cacheStatus is not CacheStatus.Cached
+					? "Active chunk must be cached but was not."
+					: "Not enough memory streams for active chunk.");
+			}
+
+			// get a filestream from the pool, or create one if the pool is empty.
+			if (_fileStreams.TryDequeue(out item))
+				return item;
+
+			if (_selfdestructin54321)
+				throw new FileBeingDeletedException();
+
+			var internalStreamCount = Interlocked.Increment(ref _internalStreamsCount);
+			if (internalStreamCount > _maxReaderCount)
+				throw new Exception("Unable to acquire reader work item. Max reader count reached.");
+
+			Interlocked.Increment(ref _fileStreamCount);
+			if (_selfdestructin54321) {
+				if (Interlocked.Decrement(ref _fileStreamCount) == 0)
+					CleanUpFileStreamDestruction();
+				throw new FileBeingDeletedException();
+			}
+
+			return CreateInternalReaderWorkItem();
 		}
 
 		private void ReturnReaderWorkItem(ReaderWorkItem item) {
@@ -1023,16 +1105,15 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 				// low (or possibly none), because Caching is the only slow operation while holding
 				// the lock and it only occurs when there are no outstanding memory readers, but we know
 				// there is one currently because we are in the process of returning it.
+				_memStreams.Enqueue(item);
 				Thread.MemoryBarrier();
 				if (_cacheStatus == CacheStatus.Uncaching || _selfdestructin54321)
 					TryDestructMemStreams();
 			} else {
+				_fileStreams.Enqueue(item);
 				if (_selfdestructin54321)
 					TryDestructFileStreams();
 			}
-
-			item.Reader.Dispose();
-			item.Stream.Dispose();
 		}
 
 		public TFChunkBulkReader AcquireReader() {
@@ -1054,15 +1135,14 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 
 			// if we get here, then we reserved TFChunk for sure so no one should dispose of chunk file
 			// until client returns dedicated reader
-			return new TFChunkBulkReader(this, GetSequentialReaderFileStream(), isMemory: false);
+			return new TFChunkBulkReader(this, CreateFileStreamForBulkReader(), isMemory: false);
 		}
 
-		private Stream GetSequentialReaderFileStream() {
-			return _inMem
-				? new UnmanagedMemoryStream((byte*)_cachedData, _fileSize)
-				: _unbuffered
-				? _handle.AsUnbufferedStream(FileAccess.Read)
-				: new BufferedStream(_handle.AsUnbufferedStream(FileAccess.Read), 65536);
+		private Stream CreateFileStreamForBulkReader() {
+			Debug.Assert(_handle is not null);
+
+			var stream = _handle.AsUnbufferedStream(FileAccess.Read);
+			return _unbuffered ? stream : new BufferedStream(stream, 65536);
 		}
 
 		// tries to acquire a bulk reader over a memstream but
