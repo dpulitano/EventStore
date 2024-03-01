@@ -973,6 +973,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 			_writerWorkItem?.Dispose();
 
 			if (!_inMem) {
+				_handle?.Dispose();
 				Helper.EatException(() => File.SetAttributes(_filename, FileAttributes.Normal));
 
 				if (_deleteFile) {
