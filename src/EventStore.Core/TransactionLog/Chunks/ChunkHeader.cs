@@ -57,7 +57,7 @@ namespace EventStore.Core.TransactionLog.Chunks {
 			Debug.Assert(Version >= 0);
 
 			ChunkSize = reader.ReadLittleEndian<int>();
-			Debug.Assert(ChunkSize > 0);
+			Debug.Assert(ChunkSize >= 0);
 
 			ChunkStartNumber = reader.ReadLittleEndian<int>();
 			Debug.Assert(ChunkStartNumber >= 0);
