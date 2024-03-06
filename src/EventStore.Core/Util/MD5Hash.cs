@@ -1,9 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Security.Cryptography;
-using DotNext;
 using EventStore.Common.Utils;
-using Microsoft.Win32.SafeHandles;
 using MD5 = EventStore.Core.Hashing.MD5;
 
 namespace EventStore.Core.Util {
