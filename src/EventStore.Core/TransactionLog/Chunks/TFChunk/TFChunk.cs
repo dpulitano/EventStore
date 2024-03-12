@@ -925,7 +925,9 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 
 			Thread.MemoryBarrier();
 
-			bool closed = TryDestructFileStreams() & TryDestructMemStreams();
+			bool closed = true;
+			closed &= TryDestructFileStreams();
+			closed &= TryDestructMemStreams();
 			if (closed && _handle is not null)
 				_handle.Dispose();
 
