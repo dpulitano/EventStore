@@ -49,18 +49,18 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 		}
 
 		public static PosMap FromOldFormat(BinaryReader reader) {
-			var posmap = reader.ReadUInt64();
-			var logPos = (int)(posmap >> 32);
-			var actualPos = (int)(posmap & 0xFFFFFFFF);
-			return new PosMap(logPos, actualPos);
+			Span<byte> buffer = stackalloc byte[DeprecatedSize];
+			var bytesRead = reader.Read(buffer);
+			return FromOldFormat(buffer.Slice(0, bytesRead));
 		}
 
 		public readonly void Write(BinaryWriter writer) {
-			writer.Write(ActualPos);
-			writer.Write(LogPos);
+			Span<byte> buffer = stackalloc byte[FullSize];
+			Format(buffer);
+			writer.Write(buffer);
 		}
 
-		public void Format(Span<byte> destination){
+		public readonly void Format(Span<byte> destination){
 			SpanWriter<byte> writer = new(destination);
 			writer.WriteLittleEndian(ActualPos);
 			writer.WriteLittleEndian(LogPos);
