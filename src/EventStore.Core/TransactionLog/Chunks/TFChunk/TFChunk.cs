@@ -245,12 +245,16 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 				throw new CorruptDatabaseException(new ChunkNotFoundException(_filename));
 
 			_fileSize = (int)fileInfo.Length;
+
+			// RandomAccess for reader work items (because their consumers always adjust the position within the stream)
+			// SequentialScan for bulk readers
+			const FileOptions options = FileOptions.RandomAccess | FileOptions.SequentialScan;
 			_handle = File.OpenHandle(
 				_filename,
 				FileMode.Open,
 				FileAccess.Read,
 				FileShare.ReadWrite,
-				_reduceFileCachePressure ? FileOptions.None : FileOptions.RandomAccess | FileOptions.SequentialScan);
+				_reduceFileCachePressure ? FileOptions.None : options);
 
 			IsReadOnly = true;
 			SetAttributes(_filename, true);
@@ -921,10 +925,10 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 
 			Thread.MemoryBarrier();
 
-			bool closed = true;
-			closed &= TryDestructFileStreams();
-			closed &= TryDestructMemStreams();
-			_handle?.Dispose();
+			bool closed = TryDestructFileStreams() & TryDestructMemStreams();
+			if (closed && _handle is not null)
+				_handle.Dispose();
+
 			return closed;
 		}
 
