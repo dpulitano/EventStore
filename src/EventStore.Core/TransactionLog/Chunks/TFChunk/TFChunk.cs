@@ -1144,10 +1144,17 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 		}
 
 		private Stream CreateFileStreamForBulkReader() {
-			Debug.Assert(_handle is not null);
+			Stream result;
+			if (_inMem) {
+				result = new UnmanagedMemoryStream((byte*)_cachedData, _fileSize);
+			} else {
+				result = _handle.AsUnbufferedStream(FileAccess.Read);
+				if (!_unbuffered) {
+					result = new BufferedStream(result, 65536);
+				}
+			}
 
-			var stream = _handle.AsUnbufferedStream(FileAccess.Read);
-			return _unbuffered ? stream : new BufferedStream(stream, 65536);
+			return result;
 		}
 
 		// tries to acquire a bulk reader over a memstream but
