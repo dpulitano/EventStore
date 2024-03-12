@@ -13,11 +13,8 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 			Reader = new(Stream);
 		}
 
-		public ReaderWorkItem(SafeFileHandle handle, bool unbuffered) {
-			Stream = handle.AsUnbufferedStream(FileAccess.Read);
-			if (!unbuffered)
-				Stream = new BufferedStream(Stream, BufferSize);
-
+		public ReaderWorkItem(SafeFileHandle handle) {
+			Stream = new BufferedStream(handle.AsUnbufferedStream(FileAccess.Read), BufferSize);
 			Reader = new(Stream);
 		}
 

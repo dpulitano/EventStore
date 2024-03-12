@@ -384,7 +384,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 		private ReaderWorkItem CreateInternalReaderWorkItem() {
 			Debug.Assert(_handle is not null);
 
-			return new ReaderWorkItem(_handle, _unbuffered);
+			return new(_handle);
 		}
 
 		private void CreateInMemChunk(ChunkHeader chunkHeader, int fileSize) {
@@ -1150,10 +1150,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 			if (_inMem) {
 				result = new UnmanagedMemoryStream((byte*)_cachedData, _fileSize);
 			} else {
-				result = _handle.AsUnbufferedStream(FileAccess.Read);
-				if (!_unbuffered) {
-					result = new BufferedStream(result, 65536);
-				}
+				result = new BufferedStream(_handle.AsUnbufferedStream(FileAccess.Read), 65536);
 			}
 
 			return result;
