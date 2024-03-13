@@ -6,7 +6,6 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Threading;
-using DotNext.IO;
 using DotNext.Diagnostics;
 using EventStore.Common.Utils;
 using EventStore.Core.Exceptions;
@@ -81,8 +80,8 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 		private ChunkFooter _chunkFooter;
 
 		private readonly int _maxReaderCount;
-		private readonly ConcurrentQueue<ReaderWorkItem> _fileStreams = new();
-		private readonly ConcurrentQueue<ReaderWorkItem> _memStreams = new();
+		private readonly ConcurrentBag<ReaderWorkItem> _fileStreams = new();
+		private readonly ConcurrentBag<ReaderWorkItem> _memStreams = new();
 		private int _internalStreamsCount;
 		private int _fileStreamCount;
 		private int _memStreamCount;
@@ -377,7 +376,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 				throw new FileBeingDeletedException();
 
 			for (int i = 0; i < _internalStreamsCount; i++) {
-				_fileStreams.Enqueue(CreateInternalReaderWorkItem());
+				_fileStreams.Add(CreateInternalReaderWorkItem());
 			}
 		}
 
@@ -405,7 +404,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 			Interlocked.Add(ref _memStreamCount, _maxReaderCount);
 
 			for (int i = 0; i < _maxReaderCount; i++) {
-				_memStreams.Enqueue(new ReaderWorkItem(_cachedData, _cachedLength));
+				_memStreams.Add(new ReaderWorkItem(_cachedData, _cachedLength));
 			}
 
 			// should never happen in practice because this function is called from the static TFChunk constructors
@@ -639,7 +638,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 				}
 
 				for (int i = 0; i < _maxReaderCount; i++) {
-					_memStreams.Enqueue(new ReaderWorkItem(_cachedData, _cachedLength));
+					_memStreams.Add(new ReaderWorkItem(_cachedData, _cachedLength));
 				}
 
 				_readSide.Uncache();
@@ -946,7 +945,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 			int fileStreamCount = Interlocked.CompareExchange(ref _fileStreamCount, 0, 0);
 
 			ReaderWorkItem workItem;
-			while (_fileStreams.TryDequeue(out workItem)) {
+			while (_fileStreams.TryTake(out workItem)) {
 				workItem.Stream.Dispose();
 				workItem.Reader.Dispose();
 				fileStreamCount = Interlocked.Decrement(ref _fileStreamCount);
@@ -1005,7 +1004,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 				int memStreamCount = Interlocked.CompareExchange(ref _memStreamCount, 0, 0);
 
 				ReaderWorkItem workItem;
-				while (_memStreams.TryDequeue(out workItem)) {
+				while (_memStreams.TryTake(out workItem)) {
 					memStreamCount = Interlocked.Decrement(ref _memStreamCount);
 				}
 
@@ -1047,7 +1046,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 
 			ReaderWorkItem item;
 			// try get memory stream reader first
-			if (_memStreams.TryDequeue(out item))
+			if (_memStreams.TryTake(out item))
 				return item;
 
 			if (_inMem)
@@ -1061,7 +1060,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 			}
 
 			// get a filestream from the pool, or create one if the pool is empty.
-			if (_fileStreams.TryDequeue(out item))
+			if (_fileStreams.TryTake(out item))
 				return item;
 
 			if (_selfdestructin54321)
@@ -1110,12 +1109,12 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 				// low (or possibly none), because Caching is the only slow operation while holding
 				// the lock and it only occurs when there are no outstanding memory readers, but we know
 				// there is one currently because we are in the process of returning it.
-				_memStreams.Enqueue(item);
+				_memStreams.Add(item);
 				Thread.MemoryBarrier();
 				if (_cacheStatus == CacheStatus.Uncaching || _selfdestructin54321)
 					TryDestructMemStreams();
 			} else {
-				_fileStreams.Enqueue(item);
+				_fileStreams.Add(item);
 				if (_selfdestructin54321)
 					TryDestructFileStreams();
 			}
