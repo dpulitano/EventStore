@@ -928,8 +928,6 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 			bool closed = true;
 			closed &= TryDestructFileStreams();
 			closed &= TryDestructMemStreams();
-			if (closed && _handle is not null)
-				_handle.Dispose();
 
 			return closed;
 		}
