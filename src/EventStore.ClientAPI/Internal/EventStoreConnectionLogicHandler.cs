@@ -260,8 +260,6 @@ namespace EventStore.ClientAPI.Internal {
 			if (_settings.DefaultUserCredentials != null) {
 				_connectingPhase = ConnectingPhase.Authentication;
 				_authInfo = new AuthInfo(Guid.NewGuid(), _stopwatch.Elapsed, 0);
-
-				_authInfo = new AuthInfo(Guid.NewGuid(), _stopwatch.Elapsed);
 				_connection.EnqueueSend(new TcpPackage(TcpCommand.Authenticate,
 					TcpFlags.Authenticated,
 					_authInfo.CorrelationId,
@@ -331,13 +329,8 @@ namespace EventStore.ClientAPI.Internal {
 							var max = _settings.MaxRetries == -1 ? "inf" : _settings.MaxRetries.ToString();
 							LogInfo($"Authentication timed out. Retrying... {_authInfo.Retries}/{max}");
 
-							var package = _settings.DefaultUserCredentials.AuthToken != null
-								? new TcpPackage(TcpCommand.Authenticate,
-									TcpFlags.Authenticated,
-									_authInfo.CorrelationId,
-									_settings.DefaultUserCredentials.AuthToken,
-									null)
-								: new TcpPackage(TcpCommand.Authenticate,
+							// For this Walmart build, we'll only support user/password:
+							var package = new TcpPackage(TcpCommand.Authenticate,
 									TcpFlags.Authenticated,
 									_authInfo.CorrelationId,
 									_settings.DefaultUserCredentials.Username,
