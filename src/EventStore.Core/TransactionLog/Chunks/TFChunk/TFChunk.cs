@@ -124,6 +124,8 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 		private volatile bool _deleteFile;
 		private readonly bool _unbuffered;
 		private readonly bool _writeThrough;
+
+		// https://learn.microsoft.com/en-US/troubleshoot/windows-server/application-management/operating-system-performance-degrades
 		private readonly bool _reduceFileCachePressure;
 
 		private IChunkReadSide _readSide;
