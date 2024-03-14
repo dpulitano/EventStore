@@ -245,15 +245,12 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 
 			_fileSize = (int)fileInfo.Length;
 
-			// RandomAccess for reader work items (because their consumers always adjust the position within the stream)
-			// SequentialScan for bulk readers
-			const FileOptions options = FileOptions.RandomAccess | FileOptions.SequentialScan;
 			_handle = File.OpenHandle(
 				_filename,
 				FileMode.Open,
 				FileAccess.Read,
 				FileShare.ReadWrite,
-				_reduceFileCachePressure ? FileOptions.None : options);
+				_reduceFileCachePressure ? FileOptions.None : FileOptions.RandomAccess);
 
 			IsReadOnly = true;
 			SetAttributes(_filename, true);
@@ -415,7 +412,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk {
 
 		private FileOptions WritableHandleOptions {
 			get {
-				var options = _reduceFileCachePressure ? FileOptions.None : FileOptions.SequentialScan;
+				var options = _reduceFileCachePressure ? FileOptions.None : FileOptions.RandomAccess;
 				if (_writeThrough)
 					options |= FileOptions.WriteThrough;
 
